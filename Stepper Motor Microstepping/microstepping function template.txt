@@ -1,0 +1,107 @@
+
+/* // Shell template 
+
+void shell(USER_DATA* data ){
+
+    char *command = getFieldString(data, 0);                // get the first command
+    tolower_string(command);                                // make command into lowercase before comparision. Strcmp also only checks for case insensitive comparision
+
+
+    if(isCommand(data,command, "help", 0)){
+        putsUart0("##############################################################\n");
+        putsUart0("Help menu -- commands list\n");
+        putsUart0("reboot\n");
+        putsUart0("move +/-angle .. move to angle cw or ccw \n");
+        putsUart0("mf microstepfactor .. set the microstep factor. Suggested uses of 2,4,8,16,32\n");
+        putsUart0("##############################################################\n");
+    }
+
+    else if(isCommand(data,command, "reboot", 0)){
+        putsUart0("Rebooting...");
+        NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
+    }
+
+    else if(isCommand(data,command, "move", 1)){
+//        char * angle;
+//        angle = getFieldString(data, 1);
+        int angle = getFieldInteger(data, 1);
+//        theta = (float)(atof(angle));
+        theta = angle;
+//        if(theta > 0){
+//            dir = true;
+//        }
+//        else{
+//            dir  = false;
+//        }
+//        theta = abs(theta);
+        runstepperFlag = true;
+    }
+    else if(isCommand(data,command, "mf", 1)){
+        microstepFactor = getFieldInteger(data, 1);             // Microstep factor is used for stepping the motor through each microstep.
+                                                                // 90 degrees is divided into multiple microsteps for incrementing teh electrical phase that drives EN PWM signals
+    }
+
+}
+
+
+*/
+
+
+
+/*
+void microstep(uint8_t num_full_steps, uint8_t microstep_factor, bool dir){
+
+    // dir  = true means cw otherwise its ccw
+    int cw_val, cw_val_comp;
+    int acw_val, acw_val_comp;
+    uint32_t total_steps = steps*microstep_factor;
+
+    if(dir){
+        cw_val = 1;        // value
+        cw_val_comp = 0;   // value compliment for clockwise direction
+    }
+    else{
+        acw_val =0;         // value and val_compliment pairs for the anti clockwise direction
+        acw_val_comp =1;
+    }
+
+    while(total_steps > 0){
+        // Set directions for both coils based on current angle of the stepper motor
+        if(cosf(theta) > 0){
+            setPinValue(MOTOR1_DIR,cw_val);
+            setPinValue(MOTOR1_DIR_COMP, cw_val_comp);
+        }
+        else{
+            setPinValue(MOTOR1_DIR,acw_val);
+            setPinValue(MOTOR1_DIR_COMP, acw_val_comp);
+        }
+
+        if(sinf(theta) > 0){
+            setPinValue(MOTOR2_DIR,cw_val);
+            setPinValue(MOTOR2_DIR_COMP, cw_val_comp);
+        }
+        else{
+            setPinValue(MOTOR2_DIR,acw_val);
+            setPinValue(MOTOR2_DIR_COMP, acw_val_comp);
+        }
+
+        // Enable PWMs
+        PWM0_0_CMPA_R = abs(1024*cosf(theta));       // motor 1 cmp vals
+
+        PWM0_1_CMPA_R =abs(1024*sinf(theta));       // motor 2 compare vals
+
+        PWM0_ENABLE_R = PWM_ENABLE_PWM0EN | PWM_ENABLE_PWM1EN;
+
+        total_steps--;                        // decrement after a step has been taken
+        theta += angle_per_step;        // increment current angle
+
+        if(theta == 360){               // reset theta to 0
+            theta = 0;
+        }
+
+        togglePinValue(BLUE_LED);       // toggle LED to indicate steps
+    }
+
+}
+*/
+

@@ -284,16 +284,18 @@ void shell(USER_DATA* data ){
     }
 
     else if(isCommand(data,command, "move", 1)){
-        char * angle;
-        angle = getFieldString(data, 1);
-        theta = (float)(atof(angle));
-        if(theta > 0){
-            dir = true;
-        }
-        else{
-            dir  = false;
-        }
-        theta = abs(theta);
+//        char * angle;
+//        angle = getFieldString(data, 1);
+        int angle = getFieldInteger(data, 1);
+//        theta = (float)(atof(angle));
+        theta = angle;
+//        if(theta > 0){
+//            dir = true;
+//        }
+//        else{
+//            dir  = false;
+//        }
+//        theta = abs(theta);
         runstepperFlag = true;
     }
     else if(isCommand(data,command, "mf", 1)){
@@ -312,18 +314,15 @@ void calibrateLevel(){
 
 }
 // state CW:
-// 1 -> 0
-// 2 -> 270
-// 3 -> 180
-// 4 -> 90
+// 0 -> 0
+// 1 -> 270
+// 2 -> 180
+// 3 -> 90
 
 void step_cw(uint32_t waitTime_us){
 
     int val = 1;
     int val_comp =0;
-
-    setPinValue(Motor1_EN, 1);
-    setPinValue(Motor2_EN, 1);
 
     switch(state)
     {
@@ -371,24 +370,91 @@ void step_cw(uint32_t waitTime_us){
     }
 }
 
+// state CCW:
+// 0 -> 0
+// 1 -> 90
+// 2 -> 180
+// 3 -> 270
+
+
 void step_ccw(uint32_t waitTime_us){
 
+    int val = 1;
+    int val_comp =0;
+
+    switch(state)
+    {
+        case 0:  // quadrant 1
+
+            setPinValue(MOTOR1_DIR,val);
+            setPinValue(MOTOR1_DIR_COMP,val_comp);
+
+            setPinValue(MOTOR2_DIR,0);
+            setPinValue(MOTOR2_DIR_COMP,0);
+            state  = (state + 1)%4;
+            waitMicrosecond(waitTime_us);
+            break;
+
+        case 1:
+            setPinValue(MOTOR1_DIR,0);
+            setPinValue(MOTOR1_DIR_COMP,0);
+
+            setPinValue(MOTOR2_DIR,val);
+            setPinValue(MOTOR2_DIR_COMP,val_comp);
+            state  = (state + 1)%4;
+            waitMicrosecond(waitTime_us);
+            break;
+
+        case 2:
+
+            setPinValue(MOTOR1_DIR,val_comp);
+            setPinValue(MOTOR1_DIR_COMP,val);
+
+            setPinValue(MOTOR2_DIR,0);
+            setPinValue(MOTOR2_DIR_COMP,0);
+            state  = (state + 1)%4;
+            waitMicrosecond(waitTime_us);
+            break;
+
+        case 3:
+            setPinValue(MOTOR1_DIR,0);
+            setPinValue(MOTOR1_DIR_COMP,0);
+
+            setPinValue(MOTOR2_DIR,val_comp);
+            setPinValue(MOTOR2_DIR_COMP,val);
+            state  = (state + 1)%4;
+            waitMicrosecond(waitTime_us);
+            break;
+    }
+
+
+
+}
+void level(){
+    int steps_from_level =0;            //  Watch the level of 0 degrees using a protrator, set the motor to be in that position
+                                        //0-180 axis and then count the steps until the pin is hit
+    while(getPinValue(OPT_ENC)){        // value goes low when the optical sensor is hit by the brass teeth
+        step_cw(50000);                 // Move one full step every time
+        steps_from_level++;
+    }
+
+    while(steps_from_level){
+        step_ccw(50000);
+    }
 }
 
-void runStepper(bool direction, uint32_t waitTime_us){
 
-//    int val =1;
-//    int val_comp =0;
+void runStepper( uint32_t waitTime_us){
 
-    setPinValue(Motor1_EN, 1);              // +- **, ** +-, **
+
+    setPinValue(Motor1_EN, 1);
     setPinValue(Motor2_EN, 1);
 
-    int full_steps = theta / 1.8;
-//    float rem_steps = theta  - 7.2*full_steps;
+    int full_steps = abs(theta) / 1.8;
 
     //Turn for these many full steps
     while(full_steps){
-        if(direction){
+        if(theta >0){
             step_cw(50000);
         }
         else{
@@ -397,14 +463,6 @@ void runStepper(bool direction, uint32_t waitTime_us){
         full_steps--;
         theta -= 1.8;
     }
-//    // Run the remaining 1.8 degree steps
-//    if(direction){
-//            step_cw(50000, state);
-//        }
-//        else{
-//            step_ccw(50000, state);
-//        }
-
 
     setPinValue(Motor1_EN, 0);          // Set the enables to 0 before leaving
     setPinValue(Motor2_EN,0);
@@ -422,23 +480,27 @@ int main(){
     putsUart0("##############################################################\n");
     putsUart0("Initialized Hardware. Type 'help' for commands list\n");
 
-    theta = 60;
-    runStepper(true, 50000);
+//Test code below
+//    theta = 30;
+//    runStepper(50000);                                        // cw rotation
+//
+//    theta = -30;
+//    runStepper(50000);                                       // ccw rotation
 
 
-//    TIMER2_CTL_R |= TIMER_CTL_TAEN;                             // turn-on timer to trigger timerISR
+//    TIMER2_CTL_R |= TIMER_CTL_TAEN;                               // turn-on timer to trigger timerISR
 
     USER_DATA data;
 
     while(true){
         if(kbhitUart0()){
-            getsUart0(&data);                                   // get the input data from putty
-            parseFields(&data);                                 // parse the putty data and check for individual commands below
+            getsUart0(&data);                                       // get the input data from putty
+            parseFields(&data);                                     // parse the putty data and check for individual commands below
             shell(&data);
         }
 
         if(runstepperFlag){
-            runStepper(dir, 50000);
+            runStepper(50000);
         }
     }
 }

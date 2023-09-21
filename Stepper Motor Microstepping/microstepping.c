@@ -36,10 +36,13 @@
 #define MOTOR2_DIR          PORTC,6
 #define MOTOR2_DIR_COMP     PORTC,7
 
-#define OPT_ENC             PORTD,7
+#define OPT_ENC             PORTE,3
 
 #define ANGLE_PER_FULL_STEP 1.8                             // 1.8 degrees per full step
 #define NUM_POLE_PAIRS      50
+
+#define TIMER_LOAD_FREQ     4000000      // 10 hz
+#define STEPS_CALIBRATE     20
 
 bool dir = true;                                            // global
 float setpointDegrees =0;
@@ -47,12 +50,14 @@ uint8_t microstepFactor = 1;
 
 uint8_t state = 0;
 bool runstepperFlag = false;
+bool calibrateFlag = false;
 
 float error =0;
 
 float current_theta =0;                                             // Input from the Uart will be saved here
 float electrical_phase =0;
 float dest_theta =0;
+float deadband = 1; // deadband of 1 degree
 
 
 void flash_hardware_green(){
@@ -73,6 +78,7 @@ void init_texas(){
     enablePort(PORTB);
     enablePort(PORTC);
     enablePort(PORTD);
+    enablePort(PORTE);
     enablePort(PORTF);
 
     // Configure LED and pushbutton pins
@@ -92,7 +98,10 @@ void init_texas(){
 
     // Optical switch interrupt configuration
     selectPinDigitalInput(OPT_ENC);
-    enablePinPullup(OPT_ENC);//????
+//    enablePinPulldown(OPT_ENC);//????
+//    selectPinInterruptRisingEdge(OPT_ENC);
+//    enablePinInterrupt(OPT_ENC);
+//    enableNvicInterrupt(INT_GPIOE);
 
     initUart0();
     setUart0BaudRate(115200, 40e6);                         // Set baud rate
@@ -136,68 +145,10 @@ void initTimer2(){
     TIMER2_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
     TIMER2_CFG_R = TIMER_CFG_32_BIT_TIMER;                  // configure as 32-bit timer (A+B)
     TIMER2_TAMR_R = TIMER_TAMR_TAMR_PERIOD;                 // configure for periodic mode (count down)
-    TIMER2_TAILR_R = 40000;                                 // set load value for interrupt rate of 1000hz
+    TIMER2_TAILR_R = TIMER_LOAD_FREQ;                                 // set load value for interrupt rate of 1000hz
     TIMER2_IMR_R = TIMER_IMR_TATOIM;                        // turn-on interrupts
     NVIC_EN0_R = 1 << (INT_TIMER2A-16);                     // turn-on interrupt 37 (TIMER2A)
 //    TIMER2_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer
-}
-
-void timerISR(){
-    uint16_t coil1_cmpVal =0;
-    uint16_t coil2_cmpVal =0;
-
-                                                            // dir  = true means cw otherwise its ccw
-    int val, val_comp;
-
-    error = setpointDegrees - current_theta;
-    if(error != 0){
-                                                            //******lookup next electrical phase and set DIR and EN pins
-
-        if(dir){
-            val = 1;                                        // value
-            val_comp = 0;                                   // value compliment for clockwise direction
-        }
-        else{
-            val =0;                                         // value and val_compliment pairs for the anti clockwise direction
-            val_comp =1;
-        }
-
-        if(cosf(electrical_phase) > 0){                     // Set DIR for Coil A-B
-            setPinValue(MOTOR1_DIR,val);
-            setPinValue(MOTOR1_DIR_COMP, val_comp);
-        }
-        else{
-            setPinValue(MOTOR1_DIR,val_comp);
-            setPinValue(MOTOR1_DIR_COMP, val);
-        }
-
-        if(sinf(electrical_phase) > 0){                     //Set DIR for Coil C-D
-            setPinValue(MOTOR2_DIR,val);
-            setPinValue(MOTOR2_DIR_COMP, val_comp);
-        }
-        else{
-            setPinValue(MOTOR2_DIR,val_comp);
-            setPinValue(MOTOR2_DIR_COMP, val);
-        }
-
-        coil1_cmpVal = abs(1023*cosf(electrical_phase));    // check if the input is in radians or degrees???
-        coil2_cmpVal = abs(1023*sinf(electrical_phase));
-
-        PWM0_0_CMPA_R = coil1_cmpVal;                       // Coil 1 EN compare values
-        PWM0_1_CMPA_R = coil2_cmpVal;                       // Coil 2 EN compare values
-
-
-//        PWM0_ENABLE_R = PWM_ENABLE_PWM0EN | PWM_ENABLE_PWM2EN;         // enable outputs
-        electrical_phase += 90/microstepFactor;             // increment current angle in electrical phase. Divide this by 50 to get the mechanical angle
-        current_theta += 1.8/microstepFactor;
-
-        if(electrical_phase == 360){                        // reset phase to 0
-            electrical_phase = 0;
-        }
-        togglePinValue(BLUE_LED);                           // toggle LED to indicate steps
-    }
-
-    TIMER2_ICR_R = TIMER_ICR_TATOCINT;
 }
 
 
@@ -319,18 +270,6 @@ void step_ccw(uint32_t waitTime_us){
 
 
 }
-void level(){
-    int steps_from_level =0;                                    //  Watch the level of 0 degrees using a protrator, set the motor to be in that position
-                                                                //0-180 axis and then count the steps until the pin is hit
-    while(getPinValue(OPT_ENC)){                                // value goes low when the optical sensor is hit by the brass teeth
-        step_cw(50000);                                         // Move one full step every time
-        steps_from_level++;
-    }
-
-    while(steps_from_level){
-        step_ccw(50000);
-    }
-}
 
 
 void runStepper( bool direction , uint32_t waitTime_us){
@@ -363,6 +302,111 @@ void runStepper( bool direction , uint32_t waitTime_us){
     runstepperFlag = false;
 
 }
+
+void calibrate_level(){
+    int steps_from_level =0;                                    //  Watch the level of 0 degrees using a protrator, set the motor to be in that position
+                                                                //0-180 axis and then count the steps until the pin is hit
+    setPinValue(Motor1_EN, 1);
+    setPinValue(Motor2_EN, 1);
+    while(!getPinValue(OPT_ENC)){                                // value goes low when the optical sensor is hit by the brass teeth
+        step_ccw(50000);                                         // Move one full step every time
+        steps_from_level++;
+    }
+
+    putsUart0("Hit the encoder for calinbration\n");
+
+    int steps_to_level = STEPS_CALIBRATE;                       // Calculated the steps to move back to level once optical encoder is hit
+
+    while(steps_to_level){
+        step_cw(50000);
+        steps_to_level --;
+    }
+    putsUart0("Calibrated to 0 degrees\n");
+
+
+    setPinValue(Motor1_EN, 0);                                          // Set the enables to 0 before leaving
+    setPinValue(Motor2_EN,0);
+
+    setpointDegrees = 0; // The set point is now at zero
+    current_theta = 0;  // current theta is 0;
+}
+
+
+void timerISR(){
+    uint16_t coil1_cmpVal =0;
+    uint16_t coil2_cmpVal =0;
+
+                                                            // dir  = true means cw otherwise its ccw
+    float sin_elecPhase, cos_elecPhase ; // Coil A, Coil B
+    int physical_angleCoeff = 1;
+    int coilA_dirCoeff = 1;
+    int coilB_dirCoeff = -1; // sin(x), cos(x) coefficients
+    if(dir){
+        physical_angleCoeff = -1; // turn ant
+        coilA_dirCoeff = -1;
+    }
+
+    error = setpointDegrees - current_theta;
+    if(abs(error) > deadband){
+                                                            //******lookup next electrical phase and set DIR and EN pins
+
+        sin_elecPhase = coilA_dirCoeff*sinf(electrical_phase*M_PI1/180);             // for ccw A,B = sinx, -cosx and for cw A,B = -sinx, -cosx
+        cos_elecPhase = coilB_dirCoeff*cosf(electrical_phase*M_PI1/180);          // -1 is introdiced because of the signs for excitation of coils in the motor
+
+
+        if(sin_elecPhase > 0){
+            // Set DIR for Coil A-B
+           setPinValue(MOTOR1_DIR,1);
+           setPinValue(MOTOR1_DIR_COMP, 0);
+        }
+        else{
+            setPinValue(MOTOR1_DIR,0);
+            setPinValue(MOTOR1_DIR_COMP, 1);
+        }
+
+
+        if(cos_elecPhase > 0){                     //Set DIR for Coil C-D
+            setPinValue(MOTOR2_DIR,1);
+            setPinValue(MOTOR2_DIR_COMP, 0);
+        }
+        else{
+            setPinValue(MOTOR2_DIR,0);
+            setPinValue(MOTOR2_DIR_COMP, 1);
+        }
+
+        coil1_cmpVal = abs(1023*sin_elecPhase);    // check if the input is in radians or degrees???
+        coil2_cmpVal = abs(1023*cos_elecPhase);
+
+        PWM0_0_CMPA_R = coil1_cmpVal;                       // Coil 1 EN compare values
+        PWM0_1_CMPA_R = coil2_cmpVal;                       // Coil 2 EN compare values
+
+        electrical_phase += (90/microstepFactor);             // increment current angle in electrical phase. Divide this by 50 to get the mechanical angle
+        current_theta += physical_angleCoeff*(1.8/microstepFactor);
+
+        if(electrical_phase == 360){                        // reset phase to 0
+            electrical_phase = 0;
+        }
+
+        togglePinValue(BLUE_LED);                           // toggle LED to indicate steps
+    }
+
+    if(calibrateFlag){
+//        calibrate_level();            // write a pwm way to calibrate it
+        calibrateFlag = false;
+    }
+
+//    else{
+//
+//        PWM0_0_CMPA_R = 1023;                       // Coil 1 EN compare values to hold the motor in place
+//        PWM0_1_CMPA_R = 1023;                       // Coil 2 EN compare values
+//        togglePinValue(RED_LED);
+//    }
+
+    TIMER2_ICR_R = TIMER_ICR_TATOCINT;
+}
+
+
+
 ///**************************Shell for commands below*////////////////////////////////////////////
 #define MAX_CHARS 80
 uint8_t count = 0;
@@ -387,30 +431,71 @@ void processShell() {
             count = 0;
             token = strtok(strInput, " ");
 
+//            if (strcmp(token, "cw") == 0) {
+//                token = strtok(NULL, " ");                              // Get the next token (angle)
+//                if (token != NULL) {
+//                    dest_theta = atof(token);
+//                    setpointDegrees = dest_theta;
+//
+//                    runstepperFlag = true;
+//                    dir = true;
+//
+//                } else {
+//                    putsUart0("Missing angle after 'cw'\n");
+//                }
+//            }
+//            if (strcmp(token, "ccw") == 0) {
+//                token = strtok(NULL, " ");                              // Get the next token (angle)
+//                if (token != NULL) {
+//                    dest_theta = atof(token);
+//                    setpointDegrees = dest_theta;
+//
+//                    runstepperFlag = true;
+//                    dir = false;
+//
+//                } else {
+//                    putsUart0("Missing angle after 'cw'\n");
+//                }
+//            }
+
             if (strcmp(token, "move") == 0) {
                 token = strtok(NULL, " ");                              // Get the next token (angle)
                 if (token != NULL) {
                     dest_theta = atof(token);
                     setpointDegrees = dest_theta;
-                    if(dest_theta < 0){
-                        dir = true; // turn clockwise
+
+                    runstepperFlag = true;
+                    if(dest_theta > 0){
+                        dir = false; // turn anticlockwise
                     }
                     else{
-                        dir = false;    // turn anticlockwise
+                        dir = true;     // turn clockwise
                     }
+
                 } else {
-                    putsUart0("Missing angle after 'move'\n");
+                    putsUart0("Missing angle after 'cw'\n");
                 }
             }
-            if (strcmp(token, "mf") == 0) {
-                            token = strtok(NULL, " ");                              // Get the next token (angle)
-                            if (token != NULL) {
-                                microstepFactor = atoi(token);
 
-                            } else {
-                                putsUart0("Missing integer after 'mf'\n");
-                            }
-                        }
+            if (strcmp(token, "mf") == 0) {
+                    token = strtok(NULL, " ");                              // Get the next token (angle)
+                    if (token != NULL) {
+                        microstepFactor = atoi(token);
+
+                    } else {
+                        putsUart0("Missing integer after 'mf'\n");
+                    }
+            }
+//            if (strcmp(token, "stop") == 0) {
+//
+//                PWM0_0_CMPA_R =0;                                       // motor 1 cmp vals
+//                PWM0_1_CMPA_R =0;                                       // motor 2 compare vals
+//            }
+//
+            if (strcmp(token, "level") == 0) {
+                calibrateFlag = true;
+            }
+
 
             if (strcmp(token, "reboot") == 0) {
                 NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
@@ -420,7 +505,8 @@ void processShell() {
                 putsUart0("##############################################################\n");
                 putsUart0("Help menu -- commands list\n");
                 putsUart0("reboot\n");
-                putsUart0("move +/-angle(float) .. move to angle cw or ccw \n");
+                putsUart0("cw angle(float) .. \n");
+                putsUart0("ccw angle(float) .. \n");
                 putsUart0("mf microstepfactor .. set the microstep factor. Suggested uses of 2,4,8,16,32\n");
                 putsUart0("##############################################################\n");
             }
@@ -435,23 +521,39 @@ void processShell() {
 
 int main(){
     init_texas();
-   // initMotorPwm();
     initTimer2();
     flash_hardware_green();
     putsUart0("##############################################################\n");
     putsUart0("Initialized Hardware. Type 'help' for commands list\n");
 
+    calibrate_level();
 
-//    TIMER2_CTL_R |= TIMER_CTL_TAEN;                               // turn-on timer to trigger timerISR
+    // Calibrated the motor. Now swtich on the PWM for Enables of motors and run the Interrupt code for microstepping
+
+    float a ,b;
+    a = sinf(0);
+    b = -1*cosf(0);
+
+    a = sinf(90);
+    b = -1*cosf(90);
+    a = sinf(180);
+    b = -1*cosf(180);
+    a = sinf(270);
+    b = -1*cosf(270);
+
+    initMotorPwm();
+
+    TIMER2_CTL_R |= TIMER_CTL_TAEN;                               // turn-on timer to trigger timerISR
 
 //    USER_DATA data;
+
 
     while(true){
 
         processShell();
 
         if(runstepperFlag){
-            runStepper(dir, 50000);
+//            runStepper(dir, 50000);
         }
     }
 }

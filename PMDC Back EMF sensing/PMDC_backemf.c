@@ -27,13 +27,14 @@
 #define PUSH_BUTTON1    PORTF,4
 
 #define PWM_PIN         PORTB,6
-#define INT_PIN         PORTC,5
+//#define INT_PIN         PORTC,5
 
 #define AIN3            PORTE,0
 
 #define TIMER_LOAD_FREQ 800000 // 50Hz
 #define CCP_TIMER_FREQ  40000000 // 1hz
-#define FREQ_IN_MASK 64
+#define FREQ_IN_MASK    64         // WT1CCP0 PC6
+#define V_SOURCE        10 // 10 V supply to PMDC motor
 
 
 int pwm_cmpVal = 512;
@@ -46,6 +47,7 @@ uint16_t sum = 0;                                           // Total fits in 16b
 uint8_t i;
 float alpha = 0.80;
 float backemf = 0.0;
+float emf_rpm = 0.0;
 
 //################################################################ HARDWARE INIT FUNCTIONS
 // Flash green LEDs after successful init of hardware
@@ -91,10 +93,17 @@ void init_texas(){
     selectPinAnalogInput(AIN3);
 
 //    // Optical switch interrupt configuration
+
+
 //    selectPinDigitalInput(INT_PIN);
 //    selectPinInterruptFallingEdge(INT_PIN);
 //    enablePinInterrupt(INT_PIN);
 //    enableNvicInterrupt(INT_GPIOC);
+
+
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;
+    SYSCTL_RCGCWTIMER_R |= SYSCTL_RCGCWTIMER_R1;
+    _delay_cycles(3);
 
     // Configure SIGNAL_IN for frequency and time measurements for counter mode
     GPIO_PORTC_AFSEL_R |= FREQ_IN_MASK;              // select alternative functions for SIGNAL_IN pin
@@ -160,9 +169,6 @@ void initTimer2(){
  */
 void enableCounterMode()
 {
-    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;
-    SYSCTL_RCGCWTIMER_R |= SYSCTL_RCGCWTIMER_R1;
-    _delay_cycles(3);
 
     // Configure Timer 1 as the time base
     TIMER1_CTL_R &= ~TIMER_CTL_TAEN;                    // turn-off timer before reconfiguring
@@ -191,19 +197,22 @@ void enableCounterMode()
  */
 void setPwmDutyCycle(){
     if(!getPinValue(PUSH_BUTTON1)){                          // if button1 is pressed
-        pwm_cmpVal += (int)(0.1* pwm_cmpVal);
+        pwm_cmpVal += (int)(0.1* 1023);
         if(pwm_cmpVal > 1023){
             pwm_cmpVal = 1023;
         }
         PWM0_0_CMPA_R = pwm_cmpVal;                         // increase the compare value
+        waitMicrosecond(1000000);
+
     }
 
     if(!getPinValue(PUSH_BUTTON2)){                          // if button2 is pressed
-            pwm_cmpVal -= (int)(0.1* pwm_cmpVal);
+            pwm_cmpVal -= 102;
             if(pwm_cmpVal < 0){
                 pwm_cmpVal = 0;
             }
             PWM0_0_CMPA_R = pwm_cmpVal;                     // Decrease the compare value
+            waitMicrosecond(1000000);
     }
 }
 
@@ -213,9 +222,19 @@ void setPwmDutyCycle(){
 void timer1Isr()    // Measure frequency
 {
     frequency = WTIMER1_TAV_R;                   // read counter input
+    float f_temp = (frequency*60/32);            // Motor frequency in rpm
+    frequency = (int)f_temp ;
     WTIMER1_TAV_R = 0;                           // reset counter for next period
-    togglePinValue(GREEN_LED);
+    togglePinValue(RED_LED);
+
+    char str[100];
+    snprintf(str, sizeof(str), "frequency optical: %d  emf_rpm : %f  PWM_compare: %d",  frequency, emf_rpm, pwm_cmpVal);
+    putsUart0(str);
+    putsUart0("\n\n");
+
     TIMER1_ICR_R = TIMER_ICR_TATOCINT;           // clear interrupt flag
+
+
 }
 
 void timer2_baackemfIsr(){  // every 20ms
@@ -235,9 +254,12 @@ void timer2_baackemfIsr(){  // every 20ms
         index = (index + 1) & 15;
     }
 
-    backemf = ((((sum >> 4)+0.5)*0.001147) - 0.7);        // takes a while for the backemf measurement to stabilize   - 15us
-                                                            // backemf = ((Vref+ - Vref-)*(sum >> 4)/4096 ) + Vref-
+    backemf = ((((sum >> 4)+0.5)*0.000806));        // takes a while for the backemf measurement to stabilize   - 15us
+    backemf = V_SOURCE - 5.7*backemf;                     // backemf = ((Vref+ - Vref-)*(sum >> 4)/4096 ) + Vref-
                                                             // Scale the backemf according ot the voltage divider connected
+
+    emf_rpm = 165.4*backemf + 11.14;    // calculation of rpm based on backemf based on linear regression model between backemf and optical rpm
+
 
 
     PWM0_0_CMPA_R = pwm_cmpVal; // Start the PWM
@@ -289,6 +311,14 @@ void processShell() {
                     }
             }
 
+            if(strcmp(token, "show") == 0){
+
+                char str[100];
+                snprintf(str, sizeof(str), "frequency optical: %d  backemf : %f  PWM_compare: %d",  frequency, backemf, pwm_cmpVal);
+                putsUart0(str);
+                putsUart0("\n\n");
+            }
+
             if (strcmp(token, "reboot") == 0) {
                 NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
             }
@@ -296,7 +326,8 @@ void processShell() {
             if (strcmp(token, "help") == 0) {
                 putsUart0("##############################################################\n");
                 putsUart0("Help menu -- commands list\n");
-                putsUart0("duty pwmpercent .. Scale the pwm by percentage 10,20,30...100");
+                putsUart0("duty pwmpercent .. Scale the pwm by percentage 10,20,30...100\n");
+                putsUart0("show .. Show current backemf, frequency, pwmcmpval\n");
                 putsUart0("reboot\n");
                 putsUart0("##############################################################\n");
             }
@@ -309,6 +340,7 @@ void processShell() {
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+
 int main(){
     init_texas();
     initPwm();
@@ -317,13 +349,17 @@ int main(){
     initAdc0Ss3();
     flash_hardware_green();
 
+    putsUart0("\n######################################################");
+    putsUart0("\nInitialized Hardware\n");
 
     // Use AIN3 input with N=4 hardware sampling
     setAdc0Ss3Mux(3);
     setAdc0Ss3Log2AverageCount(2);
 
+        TIMER2_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer
     while(true){
         processShell();
+        setPwmDutyCycle();
     }
 }
 

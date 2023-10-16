@@ -138,7 +138,7 @@ all: $(OBJS) $(CMD_SRCS) $(GEN_CMDS)
 BLDC\ motor.out: $(OBJS) $(CMD_SRCS) $(GEN_CMDS)
 	@echo 'Building target: "$@"'
 	@echo 'Invoking: Arm Linker'
-	"/home/giskusama/Applications/ccs1240/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/bin/armcl" -mv7M4 --code_state=16 --float_support=FPv4SPD16 -me --define=ccs="ccs" --define=PART_TM4C123GH6PM -g --gcc --diag_warning=225 --diag_wrap=off --display_error_number --abi=eabi -z -m"BLDC motor.map" --heap_size=0 --stack_size=512 -i"/home/giskusama/Applications/ccs1240/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/lib" -i"/home/giskusama/Applications/ccs1240/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include" --reread_libs --diag_wrap=off --display_error_number --warn_sections --xml_link_info="BLDC motor_linkInfo.xml" --rom_model -o "BLDC motor.out" $(ORDERED_OBJS)
+	"/home/giskusama/Applications/ccs1240/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/bin/armcl" -mv7M4 --code_state=16 --float_support=FPv4SPD16 -me --define=ccs="ccs" --define=PART_TM4C123GH6PM -g --gcc --diag_warning=225 --diag_wrap=off --display_error_number --abi=eabi -z -m"BLDC motor.map" --heap_size=0 --stack_size=4096 -i"/home/giskusama/Applications/ccs1240/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/lib" -i"/home/giskusama/Applications/ccs1240/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/include" --reread_libs --diag_wrap=off --display_error_number --warn_sections --xml_link_info="BLDC motor_linkInfo.xml" --rom_model -o "BLDC motor.out" $(ORDERED_OBJS)
 	@echo 'Finished building target: "$@"'
 	@echo ' '
 

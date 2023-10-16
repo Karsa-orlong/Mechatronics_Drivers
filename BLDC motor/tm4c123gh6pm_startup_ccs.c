@@ -58,7 +58,9 @@ extern uint32_t __STACK_TOP;
 extern void Timer1_activeISR();
 extern void Timer2_sleepISR();
 extern void Timer0_measureRpmISR();
-//extern void HallEffectISR();
+
+extern void Timer4_BackEmfISR();
+extern void ClosedLoopISR();
 //*****************************************************************************
 //
 // The vector table.  Note that the proper constructs must be placed on this to
@@ -90,7 +92,7 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // GPIO Port B
     IntDefaultHandler,                      // GPIO Port C
     IntDefaultHandler,                      // GPIO Port D
-    IntDefaultHandler,                      // GPIO Port E
+    ClosedLoopISR,                      // GPIO Port E
     IntDefaultHandler,                      // UART0 Rx and Tx
     IntDefaultHandler,                      // UART1 Rx and Tx
     IntDefaultHandler,                      // SSI0 Rx and Tx
@@ -106,10 +108,10 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // ADC Sequence 3
     IntDefaultHandler,                      // Watchdog timer
     Timer0_measureRpmISR,                      // Timer 0 subtimer A
-    IntDefaultHandler,                      // Timer 0 subtimer B
-    Timer1_activeISR,                      // Timer 1 subtimer A
+    IntDefaultHandler,                   // Timer 0 subtimer B
+    Timer1_activeISR,                    // Timer 1 subtimer A
     IntDefaultHandler,                      // Timer 1 subtimer B
-    Timer2_sleepISR,                      // Timer 2 subtimer A
+    Timer2_sleepISR,                     // Timer 2 subtimer A
     IntDefaultHandler,                      // Timer 2 subtimer B
     IntDefaultHandler,                      // Analog Comparator 0
     IntDefaultHandler,                      // Analog Comparator 1
@@ -156,7 +158,7 @@ void (* const g_pfnVectors[])(void) =
     0,                                      // Reserved
     IntDefaultHandler,                      // I2C2 Master and Slave
     IntDefaultHandler,                      // I2C3 Master and Slave
-    IntDefaultHandler,                      // Timer 4 subtimer A
+    Timer4_BackEmfISR,                   // Timer 4 subtimer A
     IntDefaultHandler,                      // Timer 4 subtimer B
     0,                                      // Reserved
     0,                                      // Reserved

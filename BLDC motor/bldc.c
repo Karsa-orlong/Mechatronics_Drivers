@@ -56,12 +56,12 @@
 
 #define TIMER_LOAD_FREQ     1000000
 
-uint32_t step_delay = 100000;
+uint32_t step_delay = 5000;
 uint8_t state =1;
-uint8_t nextState = 99; // some random number
-bool open_mode = true; // Function mode
-bool hall_mode = false; // isr mode
-bool backemf_mode  = false;
+// uint8_t nextState = 99; // some random number
+bool open_mode = true;                          // Open loop mode
+bool hall_mode = false;                         // Hall effect mode
+bool backemf_mode  = false;                     // Back emf mode
 
 bool comparatorCheck = false;
 uint32_t elapsed_time = 0;
@@ -88,7 +88,7 @@ state	0	1	2	3	4	5
 
  */
 //uint8_t HallBased_nextState[7] = {9,3,5,4,1,2,0}; // pattern 1 slightly worse
-//uint8_t HallBased_nextState[7] = {9,3,1,2,5,4,0}; // pattern 2 doesnt work
+//uint8_t HallBased_nextState[7] = {9,3,1,2,5,4,0}; // pattern 2 doesn't work
 uint8_t HallBased_nextState[7] = {9,4,0,5,2,3,1}; // pattern 3 working pattern
 
 
@@ -101,10 +101,12 @@ uint8_t hallBits =0;
 uint32_t frequency = 0;
 uint32_t motor_hall_rpm =0;
 uint32_t num_hall_edges = 0;
-uint32_t hp =100; // hp is hall effect active percentage
+uint32_t hp =85; // hp is hall effect active percentage
 uint32_t hallEffect_loadTime = 0;
 uint32_t hall_activeTime =0;
 uint32_t hall_inactivetime =0;
+bool rampUpFinished = false;
+
 
 //################################################################ INIT HARDWARE FUNCTIONS
 /**
@@ -125,7 +127,7 @@ void init_texas(){
     selectPinPushPullOutput(RED_LED);
     selectPinPushPullOutput(BLUE_LED);
 
-	selectPinPushPullOutput(MotorEN1);					// Configure the Enables and the voltage levels of the pins as outputs
+	selectPinPushPullOutput(MotorEN1);					                                // Configure the Enables and the voltage levels of the pins as outputs
 	selectPinPushPullOutput(MotorEN2);	
 	selectPinPushPullOutput(MotorEN3);
 
@@ -133,7 +135,7 @@ void init_texas(){
 	selectPinPushPullOutput(MotorV2);
 	selectPinPushPullOutput(MotorV3);
 
-	selectPinDigitalInput(HallIN1);						// Configure the hall effect sensors as inputs and make them trigger the GPIO interrupts for Hall effect commutation
+	selectPinDigitalInput(HallIN1);						                                // Configure the hall effect sensors as inputs and make them trigger the GPIO interrupts for Hall effect commutation
 	selectPinDigitalInput(HallIN2);
 	selectPinDigitalInput(HallIN3);
 
@@ -141,19 +143,6 @@ void init_texas(){
     selectPinDigitalInput(COMPARATOR_B);
     selectPinDigitalInput(COMPARATOR_C);
 
-    selectPinInterruptBothEdges(COMPARATOR_A);
-    enablePinInterrupt(COMPARATOR_A);
-    selectPinInterruptBothEdges(COMPARATOR_B);
-    enablePinInterrupt(COMPARATOR_B);
-    selectPinInterruptBothEdges(COMPARATOR_C);
-    enablePinInterrupt(COMPARATOR_C);
-
-    selectPinInterruptBothEdges(HallIN1);
-    enablePinInterrupt(HallIN1);
-    selectPinInterruptBothEdges(HallIN2);
-    enablePinInterrupt(HallIN2);
-    selectPinInterruptBothEdges(HallIN2);
-    enablePinInterrupt(HallIN2);
 
 	// enableNvicInterrupt(INT_GPIOE); // Enable in Backemf mode in process shell
 
@@ -168,11 +157,9 @@ void init_texas(){
  * 
  */
 void initTimer1(){                                          
-    // Enable clocks
-    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;              // Enable clocks
     _delay_cycles(3);
 
-    // Configure Timer 2 for PID controller
     TIMER1_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
     TIMER1_CFG_R = TIMER_CFG_32_BIT_TIMER;                  // configure as 32-bit timer (A+B)
     TIMER1_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;                 // configure for one shot mode
@@ -183,11 +170,9 @@ void initTimer1(){
 }
 
 void initTimer2(){                                          
-    // Enable clocks
-    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R2;
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R2;              // Enable clocks
     _delay_cycles(3);
 
-    // Configure Timer 2 for PID controller
     TIMER2_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
     TIMER2_CFG_R = TIMER_CFG_32_BIT_TIMER;                  // configure as 32-bit timer (A+B)
     TIMER2_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;                 // configure for one shot mode
@@ -202,14 +187,13 @@ void initTimer0(){
     SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R0;
     _delay_cycles(3);
 
-    // Configure Timer 2 for PID controller
     TIMER0_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
     TIMER0_CFG_R = TIMER_CFG_32_BIT_TIMER;                  // configure as 32-bit timer (A+B)
     TIMER0_TAMR_R = TIMER_TAMR_TAMR_PERIOD;                 // configure for one shot mode
-    TIMER0_TAILR_R = 40000000;                       // set load value for interrupt rate of 1hz to measure teh rpm of the motor
+    TIMER0_TAILR_R = 40000000;                              // set load value for interrupt rate of 1hz to measure teh rpm of the motor
     TIMER0_IMR_R = TIMER_IMR_TATOIM;                        // turn-on interrupts
     NVIC_EN0_R = 1 << (INT_TIMER0A-16);                     // turn-on interrupt 37 (TIMER2A)
-   	TIMER0_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer0
+   	TIMER0_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer0
 }
 
 void initTimer4(){                                        
@@ -217,14 +201,30 @@ void initTimer4(){
     SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R4;
     _delay_cycles(3);
 
-    // Configure Timer 2 for PID controller
-    TIMER4_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
-    TIMER4_CFG_R = TIMER_CFG_32_BIT_TIMER;                  // configure as 32-bit timer (A+B)
-    TIMER4_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;                 // configure for one shot mode
-    TIMER4_TAILR_R = 0xFFFFFFFF;                       // set load value large load value 
-    TIMER4_IMR_R = TIMER_IMR_TATOIM;                        // turn-on interrupts
-    NVIC_EN2_R = 1 << (INT_TIMER4A-16 - 32*2);                     // turn-on interrupt vector 86 (TIMER4A)
-//    TIMER4_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer4
+    TIMER4_CTL_R &= ~TIMER_CTL_TAEN;                                                            // turn-off timer before reconfiguring
+    TIMER4_CFG_R = TIMER_CFG_32_BIT_TIMER;                                                      // configure as 32-bit timer (A+B)
+//    TIMER4_TAMR_R = TIMER_TAMR_TAMR_1_SHOT | TIMER_TAMR_TACDIR;                               // configure for one shot mode
+    TIMER4_TAMR_R = TIMER_TAMR_TACMR | TIMER_TAMR_TAMR_CAP| TIMER_TAMR_TACDIR;                  // configure edge time mode count up
+    TIMER4_TAILR_R = 0xFFFFFFFF;                                                                // set load value large load value 
+    TIMER4_IMR_R = TIMER_IMR_TATOIM;                                                            // turn-on interrupts
+    TIMER4_TAV_R = 0;
+    NVIC_EN2_R = 1 << (INT_TIMER4A-16 - 32*2);                                                  // turn-on interrupt vector 86 (TIMER4A)
+//    TIMER4_CTL_R |= TIMER_CTL_TAEN;                                                           // turn-on timer4
+}
+
+void initWTimer5(){
+    SYSCTL_RCGCWTIMER_R |= SYSCTL_RCGCWTIMER_R5;
+    _delay_cycles(3);
+
+    WTIMER5_CTL_R &= ~TIMER_CTL_TAEN;
+    WTIMER5_CFG_R = 0x4;                                // Configure a 32 bit counter
+    WTIMER5_TAMR_R = TIMER_TAMR_TAMR_PERIOD | TIMER_TAMR_TACDIR; // Periodic and count up
+    WTIMER5_TAILR_R = 40000000;                         // 1s load time
+    WTIMER5_IMR_R = TIMER_IMR_TATOIM;                   // turn-on interrupts
+    WTIMER5_TAV_R = 0;                                  // zero counter for first period
+    // WTIMER5_CTL_R |= TIMER_CTL_TAEN;                    // turn-on counter
+    NVIC_EN3_R = 1<< (INT_WTIMER5A - 16 - 32*3);        // Turn on NVIC interrupt for WTIMER5
+
 }
 
 //################################################################ OPEN LOOP COMMUTATION
@@ -244,7 +244,7 @@ void commutateOpenLoop(uint32_t step_delay_us){
 			state = (state + 1)%6;
             waitMicrosecond(step_delay_us);
 
-            putsUart0("A - B f C +\n");
+            // putsUart0("A - B f C +\n");
             break;
 
         case 1:
@@ -261,7 +261,7 @@ void commutateOpenLoop(uint32_t step_delay_us){
 			state = (state + 1)%6;
             waitMicrosecond(step_delay_us);
 
-            putsUart0("A - B + C f\n");
+            // putsUart0("A - B + C f\n");
             break;
 
         case 2:
@@ -278,7 +278,7 @@ void commutateOpenLoop(uint32_t step_delay_us){
 			state = (state + 1)%6;
             waitMicrosecond(step_delay_us);
 
-            putsUart0("A f B + C -\n");
+            // putsUart0("A f B + C -\n");
             break;
 
         case 3:
@@ -295,7 +295,7 @@ void commutateOpenLoop(uint32_t step_delay_us){
 			state = (state + 1)%6;
             waitMicrosecond(step_delay_us);
 
-            putsUart0("A + B f C -\n");
+            // putsUart0("A + B f C -\n");
             break;
 
         case 4:
@@ -311,7 +311,7 @@ void commutateOpenLoop(uint32_t step_delay_us){
 
 			state = (state + 1)%6;
             waitMicrosecond(step_delay_us);
-            putsUart0("A + B - C f\n");
+            // putsUart0("A + B - C f\n");
             break;
 
         case 5:
@@ -327,14 +327,14 @@ void commutateOpenLoop(uint32_t step_delay_us){
 
 			state = (state + 1)%6;
             waitMicrosecond(step_delay_us);
-            putsUart0("A f B - C +\n");
+            // putsUart0("A f B - C +\n");
             break;
     }
 }
 //################################################################ HALL EFFECT COMMUTATION
 
 /*
-state	0	1	2	3	4	5
+state	0	1	2	3	4	5   Grab the next state based on the HallBits seen. the array used is the HallBased_nextState[7]. Ignore the 0th bit
     H1	1	1	0	0	0	1
     H2	0	0	0	1	1	1
     H3	0	1	1	1	0	0
@@ -443,6 +443,182 @@ void commutateClosedLoop(uint8_t case_state){
 
 
 
+/**
+ * @brief This ISR is hit after the active time for the Motor has been crossed. We de-energize the coils and exit from here
+ * 
+ */
+void Timer1_activeISR(){
+    
+    hall_inactivetime = (uint32_t)((98-hp)*hallEffect_loadTime/100);   // Hall effect inactive percentage
+        
+    TIMER2_TAILR_R = hall_inactivetime;                         // start the timer2 to run for (T- 1/freq * percentage) amount of time
+    TIMER2_CTL_R |= TIMER_CTL_TAEN;                             // turn-on timer2 to make sure that the motor is Inactive for this duration of time
+
+    setPinValue(MotorEN1, 0);                                   // Motor coils de-energized after this ISR is hit. They were active until this is hit
+    setPinValue(MotorEN2, 0);
+    setPinValue(MotorEN3, 0);
+
+    TIMER1_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the timer1 interrupt
+//    putsUart0("T1 ");
+}
+
+/**
+ * @brief This ISR is hit after the time of inactivity has passed. We restore the state at the end and commutate to the next one 
+ * 
+ */
+void Timer2_sleepISR(){
+    commutateClosedLoop(state); // Revert back to the state that was active before all coils were turned off for the Hall effect based commutation
+
+    TIMER2_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the timer2 interrupt
+//    putsUart0("T2\n");
+
+}
+
+/**
+ * @brief Measure the rotations per second or frequency and use that to also calculate the rpm of the motor
+ * Use this frequency to also check how much of the time should the Hall effect sensor be active and inactive for between each pattern change that occurs
+ */
+void Timer0_measureRpmISR(){
+
+	frequency = (uint32_t)(num_hall_edges/12);	// gives the value of revolutions per second
+	motor_hall_rpm = frequency*60;
+	num_hall_edges =0;	// Get the num hall edges counted in th eHall effect ISR and measure the frequency every one second
+
+	TIMER0_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the timer0 interrupt
+	togglePinValue(BLUE_LED);
+
+}
+
+//################################################################ BACK-EMF COMMUTATION
+
+/**
+ * @brief This function follows an excitation sequence and starts a timer right after a given coil is set as a floating coil for the backemf to be measured
+ * and using the back-emf comparator circuit the Timer4ISR commutates it to the next state
+ * @param case_state Commutate through the motor states by activating coils according to a given excitation sequence
+ */
+
+void commutateBackEmf(uint8_t case_state){
+    waitMicrosecond(100); // wait for the magnetic dump to be finished
+    switch(case_state){
+        case 0:
+            setPinValue(MotorEN1, 1);   // A -
+            setPinValue(MotorV1, 0);
+
+            setPinValue(MotorEN2, 0); // B float
+            // setPinValue();
+//            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+            WTIMER5_CTL_R |= TIMER_CTL_TAEN;
+
+
+            setPinValue(MotorEN3, 1); // C +
+            setPinValue(MotorV3, 1);
+
+            break;
+
+        case 1:
+
+            setPinValue(MotorEN1, 1); // A -
+            setPinValue(MotorV1, 0);
+
+            setPinValue(MotorEN2, 1); // B +
+            setPinValue(MotorV2, 1);
+
+            setPinValue(MotorEN3, 0); // C float
+            // setPinValue(MotorV3, 0);
+//            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+            WTIMER5_CTL_R |= TIMER_CTL_TAEN;
+
+            break;
+
+        case 2:
+
+            setPinValue(MotorEN1, 0); // A float
+            // setPinValue(MotorV1, 1);
+//            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+            WTIMER5_CTL_R |= TIMER_CTL_TAEN;
+
+            setPinValue(MotorEN2, 1); // B +
+            setPinValue(MotorV2, 1);
+
+            setPinValue(MotorEN3, 1); // C -
+            setPinValue(MotorV3, 0);
+
+            break;
+
+        case 3:
+
+            setPinValue(MotorEN1, 1); // A +
+            setPinValue(MotorV1, 1);
+
+            setPinValue(MotorEN2, 0); // B float
+            // setPinValue(MotorV2, 0);
+//            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+            WTIMER5_CTL_R |= TIMER_CTL_TAEN;
+
+            setPinValue(MotorEN3, 1); // C -
+            setPinValue(MotorV3, 0);
+
+            break;
+
+        case 4:
+
+            setPinValue(MotorEN1, 1); // A +
+            setPinValue(MotorV1, 1);
+
+            setPinValue(MotorEN2, 1); // B -
+            setPinValue(MotorV2, 0);
+
+            setPinValue(MotorEN3, 0); // C float
+            // setPinValue(MotorV3, 0);
+//            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+            WTIMER5_CTL_R |= TIMER_CTL_TAEN;
+
+            break;
+
+        case 5:
+
+            setPinValue(MotorEN1, 0); // A float
+            // setPinValue(MotorV1, 0);
+//            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+            WTIMER5_CTL_R |= TIMER_CTL_TAEN;
+
+            setPinValue(MotorEN2, 1); // B -
+            setPinValue(MotorV2, 0);
+
+            setPinValue(MotorEN3, 1); // C +
+            setPinValue(MotorV3, 1);
+
+            break;
+    }
+    // elapsed_time = TIMER4_TAV_R;
+}
+
+/**
+ * @brief This ISR is loaded with a huge load value and should not be triggered until the load value is modified by the Comparator ISR
+ * This ISR commutates to the next state after comparator signal has been triggered
+ */
+void Timer4_BackEmfISR(){
+
+    if(comparatorCheck){
+        comparatorCheck = false;
+        commutateBackEmf(state);
+        putsUart0("step     ");
+    }
+    // TIMER4_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the timer 4 interrupt
+
+}
+void WTimer5_BackEmfISR(){
+
+    if(comparatorCheck){
+        comparatorCheck = false;
+        commutateBackEmf(state);
+        putsUart0("Wstep     ");
+    }
+    WTIMER5_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the Wtimer5 interrupt
+    togglePinValue(GREEN_LED);
+
+}
+//################################################################ HALL and BACK EMF GPIO ISR
 void ClosedLoopISR(){
 
     char msg[40];
@@ -470,180 +646,31 @@ void ClosedLoopISR(){
 
     if(backemf_mode){
             
-        elapsed_time = TIMER4_TAV_R;                            // Get the elapsed time value
+        // elapsed_time = TIMER4_TAV_R;                            // Get the elapsed time value
+        // TIMER4_TAV_R = 0;
 
-        TIMER4_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
-        TIMER4_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;                 // reset the timer to one shot timer with a huge load value
-        TIMER4_TAILR_R = elapsed_time;                          // set load value large load value 
-        TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+        // TIMER4_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
+        // TIMER4_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;                 // reset the timer to one shot timer with a huge load value
+        // TIMER4_TAILR_R = elapsed_time;                          // set load value large load value 
+        // TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
+
+        
+        elapsed_time = WTIMER5_TAV_R;                            // Get the elapsed time value
+        WTIMER5_TAV_R = 0;
+
+        WTIMER5_CTL_R &= ~TIMER_CTL_TAEN;                        // turn-off timer before reconfiguring
+        WTIMER5_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;                 // reset the timer to one shot timer with a huge load value
+        WTIMER5_TAILR_R = elapsed_time;                          // set load value large load value 
+        WTIMER5_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
         
         state++;                                                // Increment the state and wait for an equivalent elapsed_time before commutating to next state
         comparatorCheck = true;                                 //flag to use in TImer4 ISR
+        putsUart0("b ");
         
     }
 
     GPIO_PORTE_ICR_R |= 0xFF;                               // Clear all port E interrupts
 }
-
-
-/**
- * @brief This ISR is hit after the active time for the Motor has been crossed. We de-energize the coils and exit from here
- * 
- */
-void Timer1_activeISR(){
-    
-    hall_inactivetime = (uint32_t)((98-hp)*hallEffect_loadTime/100);   // Hall effect inactive percentage
-        
-    TIMER2_TAILR_R = hall_inactivetime;                         // start the timer2 to run for (T- 1/freq * percentage) amount of time
-    TIMER2_CTL_R |= TIMER_CTL_TAEN;                             // turn-on timer2 to make sure that the motor is Inactive for this duration of time
-
-    setPinValue(MotorEN1, 0);           // Motor coils de-energized after this ISR is hit. They were active until this is hit
-    setPinValue(MotorEN2, 0);
-    setPinValue(MotorEN3, 0);
-//    setPinValue(MotorV1, 0);
-//    setPinValue(MotorV2, 0);
-//    setPinValue(MotorV3, 0);
-
-    TIMER1_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the timer1 interrupt
-}
-
-/**
- * @brief This ISR is hit after the time of inactivity has passed. We restore the state at the end and commutate to the next one 
- * 
- */
-void Timer2_sleepISR(){
-    commutateClosedLoop(state); // Revert back to the state that was active before all coils were turned off for the Hall effect based commutation
-
-    TIMER2_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the timer2 interrupt
-}
-
-/**
- * @brief Measure the rotations per second or frequency and use that to also calculate the rpm of the motor
- * Use this frequency to also check how much of the time should the Hall effect sensor be active and inactive for between each pattern change that occurs
- */
-void Timer0_measureRpmISR(){
-
-	frequency = (uint32_t)(num_hall_edges/12);	// gives the value of revolutions per second
-	motor_hall_rpm = frequency*60;
-	num_hall_edges =0;	// Get the num hall edges counted in th eHall effect ISR and measure the frequency every one second
-
-	TIMER0_ICR_R = TIMER_ICR_TATOCINT;                                      // Clear the timer0 interrupt
-	togglePinValue(BLUE_LED);
-
-}
-
-//################################################################ BACK-EMF COMMUTATION
-
-/**
- * @brief This function follows an excitation sequence and starts a timer right after a given coil is set as a floating coil for the backemf to be measured
- * and using the back-emf comparator circuit the Timer4ISR commutates it to the next state
- * @param case_state Commutate through the motor states by activating coils according to a given excitation sequence
- */
-
-void commutateBackEmf(uint8_t case_state){
-    switch(case_state){
-        case 0:
-            setPinValue(MotorEN1, 1);   // A -
-            setPinValue(MotorV1, 0);
-
-            setPinValue(MotorEN2, 0); // B float
-            // setPinValue();
-            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
-
-
-            setPinValue(MotorEN3, 1); // C +
-            setPinValue(MotorV3, 1);
-
-            break;
-
-        case 1:
-
-            setPinValue(MotorEN1, 1); // A -
-            setPinValue(MotorV1, 0);
-
-            setPinValue(MotorEN2, 1); // B +
-            setPinValue(MotorV2, 1);
-
-            setPinValue(MotorEN3, 0); // C float
-            // setPinValue(MotorV3, 0);
-            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
-
-            break;
-
-        case 2:
-
-            setPinValue(MotorEN1, 0); // A float
-            // setPinValue(MotorV1, 1);
-            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
-
-            setPinValue(MotorEN2, 1); // B +
-            setPinValue(MotorV2, 1);
-
-            setPinValue(MotorEN3, 1); // C -
-            setPinValue(MotorV3, 0);
-
-            break;
-
-        case 3:
-
-            setPinValue(MotorEN1, 1); // A +
-            setPinValue(MotorV1, 1);
-
-            setPinValue(MotorEN2, 0); // B float
-            // setPinValue(MotorV2, 0);
-            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
-
-            setPinValue(MotorEN3, 1); // C -
-            setPinValue(MotorV3, 0);
-
-            break;
-
-        case 4:
-
-            setPinValue(MotorEN1, 1); // A +
-            setPinValue(MotorV1, 1);
-
-            setPinValue(MotorEN2, 1); // B -
-            setPinValue(MotorV2, 0);
-
-            setPinValue(MotorEN3, 0); // C float
-            // setPinValue(MotorV3, 0);
-            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
-
-            break;
-
-        case 5:
-
-            setPinValue(MotorEN1, 0); // A float
-            // setPinValue(MotorV1, 0);
-            TIMER4_CTL_R |= TIMER_CTL_TAEN;                         // turn-on timer4
-
-            setPinValue(MotorEN2, 1); // B -
-            setPinValue(MotorV2, 0);
-
-            setPinValue(MotorEN3, 1); // C +
-            setPinValue(MotorV3, 1);
-
-            break;
-    }
-}
-
-/**
- * @brief This ISR is loaded with a huge load value and should not be triggered until the load value is modified by the Comparator ISR
- * This ISR commutates to the next state after comparator signal has been triggered
- */
-void Timer4_BackEmfISR(){
-
-    if(comparatorCheck){
-        TIMER4_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;                 // reset the timer to one shot timer with a huge load value
-        TIMER4_TAILR_R = 0xFFFFFFFF;                            // set load value large load value 
-        comparatorCheck = false;
-        commutateBackEmf(state);
-    }
-    TIMER4_ICR_R = TIMER_ICR_TATOCINT;                          // Clear the timer 4 interrupt
-
-}
-
 
 //################################################################ Shell for commands from putty below*
 #define MAX_CHARS 80
@@ -689,9 +716,24 @@ void processShell() {
 
             if (strcmp(token, "hall") == 0) {
                 token = strtok(NULL, " ");                                      // Get the next token 
+
+                selectPinInterruptBothEdges(HallIN1);
+                enablePinInterrupt(HallIN1);
+                selectPinInterruptBothEdges(HallIN2);
+                enablePinInterrupt(HallIN2);
+                selectPinInterruptBothEdges(HallIN2);
+                enablePinInterrupt(HallIN2);
+
+
+                disablePinInterrupt(COMPARATOR_A);
+                disablePinInterrupt(COMPARATOR_B);
+                disablePinInterrupt(COMPARATOR_C);
+
                 hall_mode = true;
                 open_mode = false;
                 backemf_mode = false;
+                rampUpFinished = false;
+                hp = 98;
 
             }
                 if (strcmp(token, "hp") == 0) {
@@ -704,13 +746,23 @@ void processShell() {
 
             if (strcmp(token, "back") == 0) {
             token = strtok(NULL, " ");                                      // Get the next token (
+            disablePinInterrupt(HallIN1);
+            disablePinInterrupt(HallIN2);
+            disablePinInterrupt(HallIN3);
+
+            selectPinInterruptBothEdges(COMPARATOR_A);
+            enablePinInterrupt(COMPARATOR_A);
+            selectPinInterruptBothEdges(COMPARATOR_B);
+            enablePinInterrupt(COMPARATOR_B);
+            selectPinInterruptBothEdges(COMPARATOR_C);
+            enablePinInterrupt(COMPARATOR_C);
+
             hall_mode = false;
             open_mode = false;
             backemf_mode = true;
-            state =0;
+            rampUpFinished = false;
 
-            enableNvicInterrupt(INT_GPIOE);                 // Turn on Interrupts from comparators
-            TIMER4_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer4
+
 
             }
 
@@ -744,7 +796,8 @@ int main(){
 	initTimer0();
 	initTimer1();
 	initTimer2();
-    initTimer4();
+    // initTimer4();
+    initWTimer5();
 
 	putsUart0("//################################################################\n");
 	putsUart0("Initialized hardware\n");
@@ -752,7 +805,6 @@ int main(){
 	char str[40];
 
 	uint8_t  temp1 =50, temp2 =50, temp3  = 50;
-	bool rampUpFinished = false;
 
     hallBits = (getPinValue(HallIN1) << 2) | (getPinValue(HallIN2) << 1) | (getPinValue(HallIN3) << 0);
     state = HallBased_nextState[hallBits];
@@ -761,11 +813,11 @@ int main(){
 			processShell();				// Parse the inputs from putty as needed
         }
 
-        temp1 =getPinValue(HallIN1);    // test hall effects
-        temp2 = getPinValue(HallIN2);
-        temp3 = getPinValue(HallIN3);
-        snprintf(str, sizeof(str), "H1 H2 H3 : %d, %d, %d \n", temp1, temp2, temp3 );
-//        putsUart0(str);
+        // temp1 =getPinValue(HallIN1);    // test hall effects
+        // temp2 = getPinValue(HallIN2);
+        // temp3 = getPinValue(HallIN3);
+        // snprintf(str, sizeof(str), "H1 H2 H3 : %d, %d, %d \n", temp1, temp2, temp3 );
+        // putsUart0(str);
 
 			if(open_mode){
 				commutateOpenLoop(step_delay);
@@ -789,6 +841,32 @@ int main(){
                     waitMicrosecond(10000);
                     enableNvicInterrupt(INT_GPIOE);                 // Turn on Interrupts from comparators
                     rampUpFinished = true;                          // Open loop rampup finished. Dont execute this block in main and only commutate using ISR now
+			    }
+			}
+            if(backemf_mode){
+			    if(!rampUpFinished){
+                    uint32_t i = 500;
+                    while(i>0){
+                        commutateOpenLoop(5000); // Get the commutation done really fast
+                        i--;
+                    }
+                    i = 500;
+                    while(i>0){
+                        commutateOpenLoop(3000); // Get the commutation done really fast
+                        i--;
+                    }
+                    setPinValue(MotorEN1, 0);   
+                    setPinValue(MotorEN2, 0);
+                    setPinValue(MotorEN3, 0);
+
+                    waitMicrosecond(10000);
+                    
+                    enableNvicInterrupt(INT_GPIOE);                 // Turn on Interrupts from comparators
+                    rampUpFinished = true;                          // Open loop rampup finished. Dont execute this block in main and only commutate using ISR now
+//                    state = 0;
+                    putsUart0("back staterted\n");
+
+                    commutateBackEmf(state);
 			    }
 			}
 

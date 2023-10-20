@@ -1,6 +1,6 @@
+"./bldc.obj"
 "./clock.obj"
 "./gpio.obj"
-"./main.obj"
 "./nvic.obj"
 "./tm4c123gh6pm_startup_ccs.obj"
 "./uart0.obj"

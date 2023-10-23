@@ -10,6 +10,9 @@
 #include "uart0.h"
 #include "nvic.h"
 
+//101 nf - 86 nf
+//11.3 nf - 8.10 nf
+// 1123 nf - 944 nf
 
 // Pins
 //Hardware init flash
@@ -24,12 +27,20 @@
 #define CO_minus            PORTC,7     // Analog comparator negative input
 #define FREQ_CCP            PORTD,0
 
-
+//Capacitance measurement
 uint32_t charge_time =0;
 double meas_capacitance =0.0;
 double other_meassurement = 0.0;
-uint32_t fixed_resistance = 1015000; // 1Meg resistor
+uint32_t fixed_resistance = 995000; // 1Meg resistor
+float calib_coeff =1.25;
+
+//Colpitts oscillator
 uint32_t frequency =0;
+uint32_t last_frequency = 0;
+int freq_error = 0;
+uint32_t threshold =0;              //TODO To be observed and filled
+
+//Deintegration
 uint32_t step_delay_us =0;
 bool deint_flag = false;
 
@@ -62,7 +73,7 @@ void initTimer0(){
 //    TIMER0_TAILR_R = 40000000;                       // set load value to 40e6 for 1s which is enough time for any
     // TIMER0_IMR_R = TIMER_IMR_TATOIM;                 // turn-on interrupts
     TIMER0_TAV_R =0;    // Set the Timer A value to zero
-    TIMER0_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer
+//    TIMER0_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer
 //    NVIC_EN0_R = 1 << (INT_TIMER0A-16);             // turn-on interrupt 37 (TIMER1A)
 }
 
@@ -97,7 +108,7 @@ void init_texas(){
 
     COMP_ACREFCTL_R |= COMP_ACREFCTL_EN|COMP_ACREFCTL_RNG| COMP_ACREFCTL_VREF_M;    // Vref = 2.469 V, ENabled
     COMP_ACCTL0_R |= COMP_ACCTL0_ASRCP_REF | COMP_ACCTL0_ISEN_RISE | COMP_ACCTL0_CINV; // Internal reference, rising edge, output inverter enabled
-    COMP_ACINTEN_R |= COMP_ACINTEN_IN0;             // Interrupt enabled
+//    COMP_ACINTEN_R |= COMP_ACINTEN_IN0;             // Interrupt enabled
 
 //    NVIC_EN0_R = 1 << (INT_COMP0-16);             // turn-on interrupt
 
@@ -115,19 +126,6 @@ void init_texas(){
 
 
 
-
-void enableTimerMode()
-{
-    WTIMER1_CTL_R &= ~TIMER_CTL_TAEN;                // turn-off counter before reconfiguring
-    WTIMER1_CFG_R = 4;                               // configure as 32-bit counter (A only)
-    WTIMER1_TAMR_R = TIMER_TAMR_TAMR_1_SHOT | TIMER_TAMR_TACDIR;
-                                                     // configure for edge time mode, count up
-    WTIMER1_TAV_R = 0;                               // zero counter for first period
-//    WTIMER1_CTL_R |= TIMER_CTL_TAEN;                 // turn-on counter
-}
-
-
-
 /**
  * @brief Pulse the DEINTEGRATE pin that privides a path for the capacitor to discharge. The caps will have enough time to discharge in a microsecond
  *
@@ -138,12 +136,33 @@ void pulse_deint(uint32_t delay_us){
     setPinValue(DEINTEGRATE, 0);
 }
 
-// Frequency counter service publishing latest frequency measurements every second
+// Frequency counter service publishing latest frequency measurements every second. Used for LAB Part 2
+/*
+ * Used for Lab Part 2
+ * TODO Hook up the Colpitts oscillator circuit. Note down the "frequency" of the oscillator observed.
+ */
 void timer1_colpitts_ISR()
 {
-    frequency = WTIMER2_TAV_R;                   // read counter input
-    WTIMER2_TAV_R = 0;                           // reset counter for next period
+    last_frequency = frequency;                     // Save the last onserved frequency and print out the change in frequency
+    frequency = WTIMER2_TAV_R;                      // read counter input
+
+    freq_error = frequency - last_frequency;        // Calculate error and print it
+
+    WTIMER2_TAV_R = 0;                              // reset counter for next period
     togglePinValue(BLUE_LED);
+
+    //TODO When teh metal plate is brought nearer to the coil, the inductance reduces and hence freequncy should increase. Observe and note down these values
+    //TODO Implement a threshold like if freq_error > threshold >> print "Object detected". Based on Observations decide what a good value of threshold frequency should be and fill it where it is declared
+
+    if(freq_error > threshold){
+        putsUart0("Metal plate detected\n");
+    }
+
+    char str[100];
+    snprintf(str, sizeof(str), "\nResonant frequency: %d  Frequency Change obs: \n", frequency, freq_error);
+    putsUart0(str);
+
+
     TIMER1_ICR_R = TIMER_ICR_TATOCINT;           // clear interrupt flag
 }
 /**
@@ -151,6 +170,7 @@ void timer1_colpitts_ISR()
  * Get the value of the charge time and
  *
  */
+/*
 void comparator0_ISR(){
         // this is a double check and may not be necessary
         // Since the CINV is true, the output is inverted. So OVAL = 1 when VIN- > VIN+ and vice versa
@@ -172,7 +192,7 @@ void comparator0_ISR(){
 
 
 }
-
+*/
 
 
 
@@ -200,25 +220,6 @@ void processShell() {
             count = 0;
             token = strtok(strInput, " ");
 
-//            if (strcmp(token, "duty") == 0) {
-//                    token = strtok(NULL, " ");                                  // Get the next token (angle)
-//                    if (token != NULL) {
-//                        int percentage = 0;
-//                        percentage = atoi(token);
-//                        float cmpval = (percentage*1023.0/100);
-//                        pwm_cmpVal = (int)cmpval;
-//                        if(pwm_cmpVal < 0){
-//                            pwm_cmpVal =0;
-//                        }
-//                        else if(pwm_cmpVal > 1023){
-//                            pwm_cmpVal = 1023;
-//                        }
-//                        PWM0_0_CMPA_R = pwm_cmpVal;
-//                    } else {
-//                        putsUart0("Missing integer after 'duty'\n");
-//                    }
-//            }
-
             if(strcmp(token, "deint") == 0){
                 deint_flag = true;
                 token = strtok(NULL, " ");                                  // Get the next token (angle)
@@ -245,7 +246,11 @@ void processShell() {
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+/*
+ * TODO : Take multiple measurements of capacitance with different water levels and form an equation " volume (ml) = k*meas_capacitance + constant"
+ * Print the volume in ml along with the capacitance and demo to mark
+ *
+ */
 
 
 int main(){
@@ -257,25 +262,45 @@ int main(){
     setUart0BaudRate(115200, 40e6);
 
     char msg[100];
+    bool check_cap = false;
 
     putsUart0("####################################################################\n");
     putsUart0("Initialzed Hardware\n");
 
     while(true){
-        processShell();
-//        snprintf(msg, sizeof(msg), "\n free running time: %d ", TIMER0_TAV_R);
-//        putsUart0(msg);
 
-        if(deint_flag){
+        if(check_cap){
+            if(COMP_ACSTAT0_R == COMP_ACSTAT0_OVAL){
+                charge_time = TIMER0_TAV_R*25;                                          // Store the timer A value in nano seconds 1 tick  = 25 nano seconds
+                TIMER0_TAV_R = 0;
+                meas_capacitance = 0.778975*charge_time*calib_coeff/fixed_resistance;   // 0.725137947 is for when there is not effect of CSE SAT voltage across the transistor
+
+                TIMER0_CTL_R &= ~TIMER_CTL_TAEN;                                        // turn-off timer
+
+
+                char str[100];
+                snprintf(str, sizeof(str), "\nCharge Time us: %d Measured Capacitance in nf : %lf \n", charge_time, meas_capacitance);
+                putsUart0(str);
+                check_cap = false;
+            }
+        }
+
+        if(deint_flag){                                                                 // Once deint 100 command is called in the putty , we pulse the deintegration pin, discharge capacitor and start the timer
 
             pulse_deint(step_delay_us);
             putsUart0("Capacitor deintegrated\n");
             deint_flag = false;
             TIMER0_TAV_R =0;
 //            COMP_ACINTEN_R |= COMP_ACINTEN_IN0;             // Interrupt enabled
-            NVIC_EN0_R = 1 << (INT_COMP0-16);             // turn-on interrupt
-//            TIMER0_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer
+//            NVIC_EN0_R = 1 << (INT_COMP0-16);             // turn-on interrupt
+
+            TIMER0_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer
+            check_cap = true;
         }
+
+        processShell();                                                                 // Used for handling putty commands
+
+
 
     }
 }

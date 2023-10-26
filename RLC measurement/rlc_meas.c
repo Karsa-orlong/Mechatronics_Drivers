@@ -41,8 +41,9 @@ int freq_error = 0;
 uint32_t threshold =0;              //TODO To be observed and filled
 
 //Deintegration
-uint32_t step_delay_us =0;
+uint32_t step_delay_us =60;
 bool deint_flag = false;
+bool continuos_deint = false;
 
 void enableCounterMode()
 {
@@ -89,6 +90,8 @@ void init_texas(){
     SYSCTL_RCGCWTIMER_R |= SYSCTL_RCGCWTIMER_R1| SYSCTL_RCGCWTIMER_R2;
     SYSCTL_RCGCACMP_R |= SYSCTL_RCGCACMP_R0; // Give clocks to the analog comparator
     _delay_cycles(3);
+
+
 
 
 
@@ -151,15 +154,12 @@ void timer1_colpitts_ISR()
     WTIMER2_TAV_R = 0;                              // reset counter for next period
     togglePinValue(BLUE_LED);
 
-    //TODO When teh metal plate is brought nearer to the coil, the inductance reduces and hence freequncy should increase. Observe and note down these values
-    //TODO Implement a threshold like if freq_error > threshold >> print "Object detected". Based on Observations decide what a good value of threshold frequency should be and fill it where it is declared
-
     if(freq_error > threshold){
         putsUart0("Metal plate detected\n");
     }
 
     char str[100];
-    snprintf(str, sizeof(str), "\nResonant frequency: %d  Frequency Change obs: \n", frequency, freq_error);
+    snprintf(str, sizeof(str), "\nResonant frequency: %d  Frequency Change obs: %d\n", frequency, freq_error);
     putsUart0(str);
 
 
@@ -170,8 +170,9 @@ void timer1_colpitts_ISR()
  * Get the value of the charge time and
  *
  */
-/*
+
 void comparator0_ISR(){
+    /*
         // this is a double check and may not be necessary
         // Since the CINV is true, the output is inverted. So OVAL = 1 when VIN- > VIN+ and vice versa
         // We will see a 1 in OVAL when Capacitor charge just crosses the Internal Voltage reference
@@ -190,9 +191,9 @@ void comparator0_ISR(){
         COMP_ACINTEN_R &= ~COMP_ACINTEN_IN0;             // Interrupt disabled
         COMP_ACMIS_R |= COMP_ACMIS_IN0; // Clear the interrupt
 
-
-}
 */
+}
+
 
 
 
@@ -227,6 +228,11 @@ void processShell() {
                         step_delay_us = atoi(token);
                 }
             }
+            if(strcmp(token, "cont") == 0){
+                continuos_deint = true;
+
+            }
+
 
             if (strcmp(token, "reboot") == 0) {
                 NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
@@ -236,6 +242,7 @@ void processShell() {
                 putsUart0("##############################################################\n");
                 putsUart0("Help menu -- commands list\n");
                 putsUart0("deint step_delay_us.. start a deintegration pulse and swith on the timer\n");
+                putsUart0("cont...continous deintegration print out the volume of the water level based on charge time\n");
                 putsUart0("reboot\n");
                 putsUart0("##############################################################\n");
             }
@@ -261,8 +268,10 @@ int main(){
     initUart0();
     setUart0BaudRate(115200, 40e6);
 
-    char msg[100];
     bool check_cap = false;
+    int count = 0;
+    float avg_vol =0;
+    int avg_cnt =0;
 
     putsUart0("####################################################################\n");
     putsUart0("Initialzed Hardware\n");
@@ -271,24 +280,35 @@ int main(){
 
         if(check_cap){
             if(COMP_ACSTAT0_R == COMP_ACSTAT0_OVAL){
-                charge_time = TIMER0_TAV_R*25;                                          // Store the timer A value in nano seconds 1 tick  = 25 nano seconds
+                charge_time = TIMER0_TAV_R*25;                                              // Store the timer A value in nano seconds 1 tick  = 25 nano seconds
+                meas_capacitance = 0.778975*charge_time*calib_coeff*1000/fixed_resistance;   // 0.725137947 is for when there is not effect of CSE SAT voltage across the transistor
+
+                TIMER0_CTL_R &= ~TIMER_CTL_TAEN;                                            // turn-off timer
                 TIMER0_TAV_R = 0;
-                meas_capacitance = 0.778975*charge_time*calib_coeff/fixed_resistance;   // 0.725137947 is for when there is not effect of CSE SAT voltage across the transistor
 
-                TIMER0_CTL_R &= ~TIMER_CTL_TAEN;                                        // turn-off timer
+                float volume_ml;
+//                volume_ml = (meas_capacitance - 109755)/4.363;                              // Calculate and display the volume based on the observed linear increase in capacitance as volume increases
+//                volume_ml = 0.0003104*charge_time - 34500;
+                  volume_ml = 0.01362*charge_time - 657.4;
 
+//                avg_vol += volume_ml;
+//                avg_cnt = (avg_cnt + 1)%16; // count from 0 -15 which is 16 times
+
+//                if(avg_cnt == 15){
+//                avg_vol = avg_vol/16;
 
                 char str[100];
-                snprintf(str, sizeof(str), "\nCharge Time us: %d Measured Capacitance in nf : %lf \n", charge_time, meas_capacitance);
+                snprintf(str, sizeof(str), "\navg_vol : %f Vol(ml): %f Time ns: %u\n",avg_vol, volume_ml, charge_time );
                 putsUart0(str);
+//                }
                 check_cap = false;
             }
         }
 
-        if(deint_flag){                                                                 // Once deint 100 command is called in the putty , we pulse the deintegration pin, discharge capacitor and start the timer
+        if(deint_flag){                                                                     // Once deint 100 command is called in the putty , we pulse the deintegration pin, discharge capacitor and start the timer
 
             pulse_deint(step_delay_us);
-            putsUart0("Capacitor deintegrated\n");
+//            putsUart0("Capacitor deintegrated\n");
             deint_flag = false;
             TIMER0_TAV_R =0;
 //            COMP_ACINTEN_R |= COMP_ACINTEN_IN0;             // Interrupt enabled
@@ -296,6 +316,18 @@ int main(){
 
             TIMER0_CTL_R |= TIMER_CTL_TAEN;                  // turn-on timer
             check_cap = true;
+        }
+
+        if(continuos_deint){
+            if(!deint_flag){
+                count++;
+            }
+            if(count == 100000){
+                count =0;
+                if(!check_cap){
+                    deint_flag = true;
+                }
+            }
         }
 
         processShell();                                                                 // Used for handling putty commands

@@ -15,6 +15,7 @@
 #include "tm4c123gh6pm.h"
 #include "gpio.h"
 #include "nvic.h"
+#include "rgb_led.h"
 
 // PortC masks
 #define FREQ_IN_MASK 64 // PC6 WT1CCP0
@@ -28,7 +29,13 @@
 uint32_t frequency =0;
 uint32_t last_frequency = 0;
 int freq_error = 0;
-uint32_t threshold =0;              //TODO To be observed and filled
+uint32_t threshold =93500;              //TODO To be observed and filled
+
+
+uint32_t big_metal_threshold = 97000;
+uint32_t small_metal_threshold = 94700;
+
+
 
 void enableCounterMode()
 {
@@ -62,11 +69,27 @@ void timer1Isr()
 
     freq_error = frequency - last_frequency;        // Calculate error and print it
 
-    togglePinValue(BLUE_LED);
 
-    if(freq_error > threshold){
-        putsUart0("Metal plate detected\n");
+
+//    if(freq_error > threshold){
+//        putsUart0("Metal plate detected\n");
+//    }big_metal_threshold
+    if(frequency > big_metal_threshold){
+        putsUart0("Big Metal plate detected\n");
+        setPinValue(GREEN_LED,0);
+        togglePinValue(RED_LED);
     }
+    else if (frequency > small_metal_threshold){
+        putsUart0("Small Metal plate detected\n");
+        setPinValue(RED_LED,0);
+        togglePinValue(GREEN_LED);
+    }
+    else
+    {
+        setPinValue(RED_LED,0);
+        setPinValue(GREEN_LED,0);
+    }
+
 
     char str[200];
     snprintf(str, sizeof(str), "\nf: %d\n", frequency);

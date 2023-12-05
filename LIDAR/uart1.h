@@ -31,5 +31,6 @@ void putcUart1(char c);
 void putsUart1(char* str);
 char getcUart1();
 bool kbhitUart1();
+char *itoa(uint32_t number, char *string);
 
 #endif

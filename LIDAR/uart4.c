@@ -21,12 +21,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "tm4c123gh6pm.h"
-#include "uart1.h"
+#include "uart4.h"
 #include "gpio.h"
 
 // Pins
-#define UART1_TX PORTC,5
-#define UART1_RX PORTC,4
+#define UART3_TX PORTC,7
+#define UART3_RX PORTC,6
 
 //-----------------------------------------------------------------------------
 // Global variables

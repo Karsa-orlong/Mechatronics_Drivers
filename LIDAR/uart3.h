@@ -31,13 +31,6 @@
 // Subroutines
 //-----------------------------------------------------------------------------
 
-typedef struct _USER_DATA
-{
-    char buffer[MAX_CHARS +1];
-    uint8_t fieldCount;
-    uint8_t fieldPosition[MAX_FIELDS];
-    char fieldType[MAX_FIELDS];
-}USER_DATA;
 
 void initUart3();
 void setUart3BaudRate(uint32_t baudRate, uint32_t fcyc);
@@ -45,12 +38,7 @@ void putcUart3(char c);
 void putsUart3(char* str);
 char getcUart3();
 bool kbhitUart3();
-void getsUart3(USER_DATA *data);
-void parseFields(USER_DATA *data);
-char* getFieldString(USER_DATA *data, uint8_t fieldNumber);
-int32_t getFieldInteger(USER_DATA *data, uint8_t fieldNumber);
-bool isCommand(USER_DATA *data, const char strCommand[], uint8_t minArguments);
-void clearData(USER_DATA *data);
+char *itoa(uint32_t number, char *string);
 
 
 #endif

@@ -37,8 +37,8 @@
 void initUart3()
 {
     // Enable clocks
-    SYSCTL_RCGCUART_R |= SYSCTL_RCGCUART_R3;
-    SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R3;
+    SYSCTL_RCGCUART_R |= SYSCTL_RCGCUART_R2;
+    SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R2;
     _delay_cycles(3);
 
     // Configure UART3 pins
@@ -99,127 +99,32 @@ bool kbhitUart3()
 {
     return !(UART3_FR_R & UART_FR_RXFE);
 }
-
-void getsUart3(USER_DATA *data)
+static char *itoa_helper(char *string, int32_t number)
 {
-    char c;
-    uint8_t count = 0;
+    if (number <= -10)
+        string = itoa_helper(string, number / 10);
 
-    while(1)
-    {
-        c = getcUart3();
-        if ( ((c == 8) || (c == 127)) && (count > 0) )
-        {
-            count--;
-        }
-        else if ( (c == 10) || (c == 13) )
-        {
-            data->buffer[count] = '\0';
-            // NOTE: Here we could go out of our way to
-            // set the rest of the data in this buffer
-            // to null terminators.
-            return;
-        }
-        else if(c >= 32 )
-        {
-            if (count == MAX_CHARS)
-            {
-                data->buffer[count] = '\0';
-                return;
-            }
-            data->buffer[count] = c;
-            count++;
-        }
-    }
+    *string++ = '0' - number % 10;
+    return string;
 }
 
-void parseFields(USER_DATA *data)
+/**
+ *      @brief Function to convert integer to string
+ *      @param string destination to store converted string
+ *      @param number to convert
+ *      @return char*
+ **/
+char *itoa(uint32_t number, char *string)
 {
-    // Context:
-    // n = numbers =                48-57   ~ [0-9]
-    // a = Capital-case Letters =   65-90   ~ [A-Z]
-    // a = Lower-case Letters =     97-122  ~ [a-z]
-    // s = Special Characters =     45-46   ~ [- and .]
-    // d = Delimiter Characters =   else    ~ [else]
-    int i = 0;
-    data->fieldCount = 0;
-    char type ='\0';
+    char *s = string;
+    if (number < 0)
+        *s++ = '-';
+    else
+        number = -number; // Append negative sign to start of number
 
-    while(data->buffer[i] != '\0')
-    {
-        type = getCharacterType(data->buffer[i]);
-        if(type != 'd')
-        {
-            data->fieldPosition[data->fieldCount] = i;
-            data->fieldType[data->fieldCount] = type;
-            data->fieldCount++;
-            while(type != 'd')
-            {
-                i++;
-                type = getCharacterType(data->buffer[i]);
-            }
-        }
-        data->buffer[i] = '\0';
-        i++;
-    }
-}
-char* getFieldString(USER_DATA *data, uint8_t fieldNumber)
-{
-    char tempString[MAX_CHARS] = "\0";
-    int i,j;
-    for(i = data->fieldPosition[fieldNumber], j = 0; data->buffer[i] != '\0' ;i++,j++)
-    {
-        tempString[j] = data->buffer[i];
-    }
-    tempString[j+1] = data->buffer[i];
-    return tempString;
-}
-int32_t getFieldInteger(USER_DATA *data, uint8_t fieldNumber)
-{
-    int32_t returnValue = strToInt(getFieldString(data, fieldNumber));
-    return returnValue;
+    *itoa_helper(s, number) = '\0'; // Append NULL character to indicate end of string
+    return string;
 }
 
-bool isCommand(USER_DATA *data, const char strCommand[], uint8_t minArguments)
-{
-    char command[MAX_CHARS] = getFieldString(data, 0);
-    bool result = true;
-    uint8_t i;
-
-    for( i = 0 ; data->buffer[i] != '\0' ; i++)
-    {
-        if (data->buffer[i] != strCommand[i] )
-        {
-            result = false;
-        }
-    }
-    if (minArguments != (data->fieldCount -1 )  )
-    {
-        result = false;
-    }
-    return result;
-}
-
-void clearData(USER_DATA *data)
-{
-    int i;
-    // CLEAR Buffer array
-    for (i=0; i < MAX_CHARS +1; i++)
-    {
-        data->buffer[i] = '\0';
-    }
-    // CLEAR fieldType array
-    for (i=0; i < MAX_FIELDS; i++)
-    {
-        data->fieldType[i] = '\0';
-    }
-    // CLEAR fieldPosition array
-    for (i=0; i < MAX_FIELDS; i++)
-    {
-        data->fieldPosition[i] = 0;
-    }
-    // CLEAR fieldCount
-    data->fieldCount = 0;
-}
 
 
